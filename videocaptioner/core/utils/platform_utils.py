@@ -29,7 +29,10 @@ def open_folder(path):
     elif system == "Darwin":  # macOS
         subprocess.Popen(["open", path])
     elif system == "Linux":
-        subprocess.Popen(["xdg-open", path])
+        try:
+            subprocess.Popen(["xdg-open", path])
+        except (OSError, subprocess.SubprocessError):
+            logger.warning(f"Cannot open folder (xdg-open not available): {path}")
     else:
         # 其他系统，尝试使用默认方式
         try:
@@ -70,7 +73,10 @@ def open_file(path):
     elif system == "Darwin":  # macOS
         subprocess.Popen(["open", path])
     elif system == "Linux":
-        subprocess.Popen(["xdg-open", path])
+        try:
+            subprocess.Popen(["xdg-open", path])
+        except (OSError, subprocess.SubprocessError):
+            logger.warning(f"Cannot open folder (xdg-open not available): {path}")
     else:
         # 其他系统，尝试使用默认方式
         try:

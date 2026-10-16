@@ -1,7 +1,6 @@
 import webbrowser
 
-from PyQt5.QtCore import Qt, QThread, QUrl, pyqtSignal
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtWidgets import QFileDialog, QLabel, QWidget
 from qfluentwidgets import (
     ComboBoxSettingCard,
@@ -21,7 +20,7 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from videocaptioner.config import AUTHOR, FEEDBACK_URL, HELP_URL, RELEASE_URL, VERSION, YEAR
+from videocaptioner.config import AUTHOR, HELP_URL, VERSION, YEAR
 from videocaptioner.core.constant import (
     INFOBAR_DURATION_ERROR,
     INFOBAR_DURATION_SUCCESS,
@@ -222,16 +221,14 @@ class SettingInterface(ScrollArea):
             self.tr("提供反馈帮助我们改进VideoCaptioner"),
             self.aboutGroup,
         )
+        self.feedbackCard.hide()  # 定制版不提供上游反馈入口
         self.aboutCard = PrimaryPushSettingCard(
-            self.tr("检查更新"),
+            self.tr("上游项目"),
             FIF.INFO,
             self.tr("关于"),
-            "© "
-            + self.tr("版权所有")
-            + f" {YEAR}, {AUTHOR}. "
-            + self.tr("版本")
-            + " "
-            + VERSION,
+            self.tr("本地中文定制版 v")
+            + VERSION
+            + f"，基于 VideoCaptioner（© {YEAR} {AUTHOR}，GPL-3.0）。不联网检查更新。",
             self.aboutGroup,
         )
 
@@ -255,7 +252,6 @@ class SettingInterface(ScrollArea):
         self.personalGroup.addSettingCard(self.languageCard)
 
         self.aboutGroup.addSettingCard(self.helpCard)
-        self.aboutGroup.addSettingCard(self.feedbackCard)
         self.aboutGroup.addSettingCard(self.aboutCard)
 
     def __createLLMServiceCards(self):
@@ -439,6 +435,17 @@ class SettingInterface(ScrollArea):
         )
         self.transcribeModelCard.comboBox.setMinimumWidth(150)
 
+        # 本地中文识别（与转录页共用同一组配置项）
+        from videocaptioner.ui.components.LocalASRSettingWidget import (
+            LocalModelManagerDialog,
+            create_basic_cards,
+        )
+
+        self.localAsrCards = create_basic_cards(self.transcribeGroup)
+        self.localAsrCards[-1].clicked.connect(
+            lambda: LocalModelManagerDialog(self.window()).exec_()
+        )
+
         # API Base URL
         self.whisperApiBaseCard = LineEditSettingCard(
             cfg.whisper_api_base,
@@ -597,6 +604,8 @@ class SettingInterface(ScrollArea):
 
         # 添加转录配置卡片
         self.transcribeGroup.addSettingCard(self.transcribeModelCard)
+        for card in self.localAsrCards:
+            self.transcribeGroup.addSettingCard(card)
         # 添加 Whisper API 配置卡片
         self.transcribeGroup.addSettingCard(self.whisperApiBaseCard)
         self.transcribeGroup.addSettingCard(self.whisperApiKeyCard)
@@ -606,7 +615,6 @@ class SettingInterface(ScrollArea):
         # 添加LLM配置卡片
         self.llmGroup.addSettingCard(self.llmServiceCard)
         # 添加OPENAI官方API链接卡片
-        self.llmGroup.addSettingCard(self.openaiOfficialApiCard)
         for config in self.llm_service_configs.values():
             for card in config["cards"]:
                 self.llmGroup.addSettingCard(card)
@@ -666,9 +674,6 @@ class SettingInterface(ScrollArea):
         self.themeColorCard.colorChanged.connect(setThemeColor)
 
         # 反馈
-        self.feedbackCard.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl(FEEDBACK_URL))  # type: ignore
-        )
 
         # 关于
         self.aboutCard.clicked.connect(self.checkUpdate)
@@ -819,7 +824,7 @@ class SettingInterface(ScrollArea):
             )
 
     def checkUpdate(self):
-        webbrowser.open(RELEASE_URL)
+        webbrowser.open(HELP_URL)
 
     def __onLLMServiceChanged(self, service):
         """处理LLM服务切换事件"""
@@ -831,8 +836,6 @@ class SettingInterface(ScrollArea):
                 card.setVisible(False)
 
         # 隐藏OPENAI官方API链接卡片
-        self.openaiOfficialApiCard.setVisible(False)
-
         # 显示选中服务的卡片
         if current_service in self.llm_service_configs:
             for card in self.llm_service_configs[current_service]["cards"]:
@@ -853,8 +856,6 @@ class SettingInterface(ScrollArea):
                     service_config["api_key"].lineEdit.setText("lm-studio")
 
             # 如果是OPENAI服务，显示官方API链接卡片
-            if current_service == LLMServiceEnum.OPENAI:
-                self.openaiOfficialApiCard.setVisible(True)
 
         # 更新布局
         self.llmGroup.adjustSize()
@@ -897,6 +898,9 @@ class SettingInterface(ScrollArea):
         is_whisper_api = model_name == TranscribeModelEnum.WHISPER_API.value
         for card in whisper_api_cards:
             card.setVisible(is_whisper_api)
+        is_local = model_name == TranscribeModelEnum.LOCAL.value
+        for card in self.localAsrCards:
+            card.setVisible(is_local)
 
         # 更新布局
         self.transcribeGroup.adjustSize()

@@ -48,7 +48,7 @@ def run(args: Namespace, config: dict) -> int:
     if err is not None:
         return err
 
-    asr_engine = get(config, "transcribe.asr", "faster-whisper")
+    asr_engine = get(config, "transcribe.asr", "local")
     language = get(config, "transcribe.language", "auto")
 
     verbose = getattr(args, "verbose", False)
@@ -77,6 +77,7 @@ def run(args: Namespace, config: dict) -> int:
     )
 
     asr_map = {
+        "local": TranscribeModelEnum.LOCAL,
         "faster-whisper": TranscribeModelEnum.FASTER_WHISPER,
         "whisper-api": TranscribeModelEnum.WHISPER_API,
         "bijian": TranscribeModelEnum.BIJIAN,
@@ -117,6 +118,15 @@ def run(args: Namespace, config: dict) -> int:
         whisper_api_base=get(config, "whisper_api.api_base", ""),
         whisper_api_model=get(config, "whisper_api.model", "whisper-1"),
         whisper_api_prompt=get(config, "whisper_api.prompt", ""),
+        # Local ASR options
+        local_model=get(config, "transcribe.local.model", "sensevoice"),
+        local_device=get(config, "transcribe.local.device", "auto"),
+        local_hotwords=get(config, "transcribe.local.hotwords", ""),
+        local_num_threads=int(get(config, "transcribe.local.num_threads", 0) or 0),
+        local_models_dir=get(config, "transcribe.local.models_dir", ""),
+        local_download_source=get(config, "transcribe.local.download_source", "auto"),
+        local_custom_mirror=get(config, "transcribe.local.custom_mirror", ""),
+        local_max_chars=int(get(config, "transcribe.local.max_chars", 25) or 25),
     )
 
 
@@ -134,7 +144,7 @@ def run(args: Namespace, config: dict) -> int:
         temp_audio = None
 
         ext_lower = input_path.suffix.lstrip(".").lower()
-        needs_conversion = ext_lower not in AUDIO_EXTENSIONS
+        needs_conversion = ext_lower not in AUDIO_EXTENSIONS and asr_engine != "local"
         # whisper-cpp requires WAV format specifically
         if not needs_conversion and asr_engine == "whisper-cpp" and ext_lower != "wav":
             needs_conversion = True

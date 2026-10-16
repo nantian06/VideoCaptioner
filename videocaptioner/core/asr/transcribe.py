@@ -3,12 +3,15 @@ from videocaptioner.core.asr.bcut import BcutASR
 from videocaptioner.core.asr.chunked_asr import ChunkedASR
 from videocaptioner.core.asr.faster_whisper import FasterWhisperASR
 from videocaptioner.core.asr.jianying import JianYingASR
+from videocaptioner.core.asr.local_asr import LocalASR
 from videocaptioner.core.asr.whisper_api import WhisperAPI
 from videocaptioner.core.asr.whisper_cpp import WhisperCppASR
 from videocaptioner.core.entities import TranscribeConfig, TranscribeModelEnum
 
 
-def transcribe(audio_path: str, config: TranscribeConfig, callback=None) -> ASRData:
+def transcribe(
+    audio_path: str, config: TranscribeConfig, callback=None, stop_event=None
+) -> ASRData:
     """Transcribe audio file using specified configuration.
 
     Args:
@@ -30,7 +33,10 @@ def transcribe(audio_path: str, config: TranscribeConfig, callback=None) -> ASRD
         raise ValueError("Transcription model not set")
 
     # Create ASR instance based on model type
-    asr = _create_asr_instance(audio_path, config)
+    if config.transcribe_model == TranscribeModelEnum.LOCAL:
+        asr = _create_local_asr(audio_path, config, stop_event)
+    else:
+        asr = _create_asr_instance(audio_path, config)
 
     # Run transcription
     asr_data = asr.run(callback=callback)
@@ -71,6 +77,26 @@ def _create_asr_instance(audio_path: str, config: TranscribeConfig) -> ChunkedAS
 
     else:
         raise ValueError(f"Invalid transcription model: {model_type}")
+
+
+def _create_local_asr(audio_path: str, config: TranscribeConfig, stop_event=None) -> LocalASR:
+    """本地中文识别：自带 VAD 切段，不需要 ChunkedASR 再切块。"""
+    return LocalASR(
+        audio_path,
+        use_cache=True,
+        need_word_time_stamp=config.need_word_time_stamp,
+        model=config.local_model,
+        device=config.local_device,
+        language=config.transcribe_language,
+        num_threads=config.local_num_threads,
+        hotwords=config.local_hotwords,
+        max_chars=config.local_max_chars,
+        models_dir=config.local_models_dir,
+        download_source=config.local_download_source,
+        custom_mirror=config.local_custom_mirror,
+        vad_threshold=config.local_vad_threshold,
+        stop_event=stop_event,
+    )
 
 
 def _create_jianying_asr(audio_path: str, config: TranscribeConfig) -> ChunkedASR:

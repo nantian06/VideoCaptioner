@@ -4,6 +4,7 @@ from typing import Optional
 
 from videocaptioner.config import MODEL_PATH
 from videocaptioner.core.entities import (
+    TranscribeModelEnum,
     LANGUAGES,
     FullProcessTask,
     LLMServiceEnum,
@@ -16,6 +17,14 @@ from videocaptioner.core.entities import (
     TranscriptAndSubtitleTask,
 )
 from videocaptioner.ui.common.config import cfg
+
+
+def _model_tag() -> str:
+    """文件名里用的识别引擎标记（去掉 ✨ 和空格）。"""
+    model = cfg.transcribe_model.value
+    if model == TranscribeModelEnum.LOCAL:
+        return f"本地-{cfg.local_model.value.value}"
+    return model.value.replace("✨", "").replace(" ", "").strip()
 
 
 class TaskFactory:
@@ -64,7 +73,7 @@ class TaskFactory:
                 Path(cfg.work_dir.value)
                 / file_name
                 / "subtitle"
-                / f"【原始字幕】{file_name}-{cfg.transcribe_model.value.value}-{cfg.transcribe_language.value.value}.srt"
+                / f"【原始字幕】{file_name}-{_model_tag()}-{cfg.transcribe_language.value.value}.srt"
             )
         else:
             need_word_time_stamp = False
@@ -93,6 +102,16 @@ class TaskFactory:
             faster_whisper_ff_mdx_kim2=cfg.faster_whisper_ff_mdx_kim2.value,
             faster_whisper_one_word=cfg.faster_whisper_one_word.value,
             faster_whisper_prompt=cfg.faster_whisper_prompt.value,
+            # 本地中文识别
+            local_model=cfg.local_model.value.value,
+            local_device=cfg.local_device.value.value,
+            local_hotwords=cfg.local_hotwords.value,
+            local_num_threads=cfg.local_num_threads.value,
+            local_models_dir=cfg.local_models_dir.value,
+            local_download_source=cfg.local_download_source.value,
+            local_custom_mirror=cfg.local_custom_mirror.value,
+            local_max_chars=cfg.local_max_chars.value,
+            local_vad_threshold=cfg.local_vad_threshold.value,
         )
 
         task = TranscribeTask(
@@ -213,9 +232,14 @@ class TaskFactory:
         task_id: Optional[str] = None,
     ) -> SynthesisTask:
         """创建视频合成任务"""
-        output_path = str(
-            Path(video_path).parent / f"【卡卡】{Path(video_path).stem}.mp4"
-        )
+        if need_next_task:
+            # 全流程：成品视频和字幕放在同一个任务文件夹（工作目录/<文件名>/）
+            job_dir = Path(subtitle_path).parent.parent
+            output_path = str(job_dir / f"{Path(video_path).stem}_字幕版.mp4")
+        else:
+            output_path = str(
+                Path(video_path).parent / f"【卡卡】{Path(video_path).stem}.mp4"
+            )
 
         # 只有启用样式时才传入样式配置
         use_style = cfg.use_subtitle_style.value

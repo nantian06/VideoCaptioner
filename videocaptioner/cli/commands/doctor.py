@@ -119,12 +119,47 @@ def _check_config_file() -> Check:
 
 
 def _check_transcribe(config: dict) -> list[Check]:
-    asr = get(config, "transcribe.asr", "bijian")
+    asr = get(config, "transcribe.asr", "local")
     checks = [Check("transcribe.asr", "ok", f"default ASR: {asr}")]
     if asr == "whisper-api" and not get(config, "whisper_api.api_key", ""):
         checks.append(Check("whisper_api.api_key", "error", "Whisper API key is missing", "Run 'videocaptioner config set whisper_api.api_key <key>'"))
     if asr == "whisper-cpp" and not any(shutil.which(n) for n in ["whisper-cpp", "whisper", "whisper-cpp-main"]):
         checks.append(Check("whisper-cpp", "error", "whisper.cpp binary not found", "Install whisper.cpp or choose --asr bijian/whisper-api"))
+    if asr == "local":
+        checks.extend(_check_local_asr(config))
+    return checks
+
+
+def _check_local_asr(config: dict) -> list[Check]:
+    from videocaptioner.core.asr.local import device as D
+    from videocaptioner.core.asr.local import models as M
+
+    checks: list[Check] = []
+    ver = D.sherpa_version()
+    if not ver:
+        return [Check("sherpa-onnx", "error", "sherpa-onnx is not installed", "Re-run the install script")]
+    has_cuda = D.sherpa_has_cuda()
+    checks.append(Check("sherpa-onnx", "ok", f"sherpa-onnx {ver} ({'CUDA build' if has_cuda else 'CPU build'})"))
+    gpus = D.nvidia_gpus()
+    if gpus and not has_cuda:
+        checks.append(Check("gpu", "warn", f"NVIDIA GPU found ({gpus[0]}) but sherpa-onnx is the CPU build",
+                            "Re-run the install script in GPU mode to enable CUDA"))
+    elif gpus:
+        root = M.get_models_root(get(config, "transcribe.local.models_dir", ""))
+        vad = M.model_path(M.MODEL_SPECS["silero-vad"], "model", root)
+        if vad.exists():
+            ok, msg = D.probe_cuda(vad)
+            checks.append(Check("gpu", "ok" if ok else "warn", f"{gpus[0]}: {msg}",
+                                "" if ok else "Install CUDA 12 + cuDNN 9 runtime (the GPU install script does this)"))
+        else:
+            checks.append(Check("gpu", "ok", f"NVIDIA GPU: {gpus[0]} (CUDA probe runs after the first model download)"))
+    else:
+        checks.append(Check("gpu", "ok", "No NVIDIA GPU detected; local ASR will use CPU"))
+    root = M.get_models_root(get(config, "transcribe.local.models_dir", ""))
+    have = [s.key for s in M.MODEL_SPECS.values() if M.is_installed(s, root)]
+    checks.append(Check("local models", "ok" if have else "warn",
+                        f"{root}: {', '.join(have) if have else 'none downloaded yet'}",
+                        "" if have else "Models download automatically on first use"))
     return checks
 
 

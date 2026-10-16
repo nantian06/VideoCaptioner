@@ -74,8 +74,18 @@ DEFAULTS: Dict[str, Any] = {
         "prompt": "",
     },
     "transcribe": {
-        "asr": "bijian",
+        "asr": "local",
         "language": "auto",
+        "local": {
+            "model": "sensevoice",
+            "device": "auto",
+            "hotwords": "",
+            "num_threads": 0,
+            "models_dir": "",
+            "download_source": "auto",
+            "custom_mirror": "",
+            "max_chars": 25,
+        },
         "faster_whisper": {
             "model": "large-v3",
             "device": "auto",

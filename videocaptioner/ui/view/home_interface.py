@@ -63,6 +63,9 @@ class HomeInterface(QWidget):
         self.pivot.setCurrentItem("TaskCreationInterface")
 
         self.task_creation_interface.finished.connect(self.switch_to_transcription)
+        self.task_creation_interface.showTranscribeSettings.connect(
+            lambda: self.stackedWidget.setCurrentWidget(self.transcription_interface)
+        )
         self.transcription_interface.finished.connect(
             self.switch_to_subtitle_optimization
         )

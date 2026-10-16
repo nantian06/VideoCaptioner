@@ -39,6 +39,10 @@ dependencies = [
     "psutil>=7.0.0",
     "GPUtil>=1.4.0",
     "edge-tts>=7.2.8",
+    # 本地中文识别（SenseVoice / Fun-ASR-Nano）。N 卡加速需另装 CUDA 版 wheel，见 README_LOCAL.md
+    "sherpa-onnx==1.13.8",
+    "sherpa-onnx-core==1.13.8",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
@@ -61,7 +65,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
-fallback-version = "0.0.0-dev"
+fallback-version = "1.5.0"
 
 [tool.hatch.build.hooks.vcs]
 version-file = "videocaptioner/_version.py"

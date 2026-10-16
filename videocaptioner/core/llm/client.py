@@ -21,6 +21,7 @@ from videocaptioner.core.utils.logger import setup_logger
 from .request_logger import create_logging_http_client, log_llm_response
 
 _global_client: Optional[OpenAI] = None
+_global_client_key: Optional[tuple] = None
 _client_lock = threading.Lock()
 
 logger = setup_logger("llm_client")
@@ -50,26 +51,30 @@ def normalize_base_url(base_url: str) -> str:
 
 
 def get_llm_client() -> OpenAI:
-    """Get global LLM client instance (thread-safe singleton)."""
-    global _global_client
+    """Get global LLM client instance (thread-safe).
 
-    if _global_client is None:
+    客户端按 (base_url, api_key) 缓存：在设置里改了 LLM 地址或密钥后，
+    下一次请求就会用新的配置，不需要重启软件。
+    """
+    global _global_client, _global_client_key
+
+    base_url = normalize_base_url(os.getenv("OPENAI_BASE_URL", "").strip())
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not base_url or not api_key:
+        raise ValueError(
+            "OPENAI_BASE_URL and OPENAI_API_KEY environment variables must be set"
+        )
+
+    key = (base_url, api_key)
+    if _global_client is None or _global_client_key != key:
         with _client_lock:
-            if _global_client is None:
-                base_url = os.getenv("OPENAI_BASE_URL", "").strip()
-                base_url = normalize_base_url(base_url)
-                api_key = os.getenv("OPENAI_API_KEY", "").strip()
-
-                if not base_url or not api_key:
-                    raise ValueError(
-                        "OPENAI_BASE_URL and OPENAI_API_KEY environment variables must be set"
-                    )
-
+            if _global_client is None or _global_client_key != key:
                 _global_client = OpenAI(
                     base_url=base_url,
                     api_key=api_key,
                     http_client=create_logging_http_client(),
                 )
+                _global_client_key = key
 
     return _global_client
 

@@ -39,6 +39,7 @@ from videocaptioner.core.entities import (
     SupportedVideoFormats,
 )
 from videocaptioner.core.utils.platform_utils import open_folder
+from videocaptioner.ui.components.RunPlanCard import PlanSummaryBar
 from videocaptioner.ui.thread.batch_process_thread import (
     BatchProcessThread,
     BatchTask,
@@ -121,8 +122,13 @@ class BatchProcessInterface(QWidget):
         # 连接双击信号
         self.task_table.doubleClicked.connect(self.on_table_double_clicked)
 
+        # 当前处理方案（与主页「处理方案」是同一份配置）
+        self.plan_bar = PlanSummaryBar(self)
+        self.plan_bar.editRequested.connect(self._open_plan)
+
         # 添加到主布局
         main_layout.addLayout(top_layout)
+        main_layout.addWidget(self.plan_bar)
         main_layout.addWidget(self.task_table)
 
         # 连接信号
@@ -130,6 +136,13 @@ class BatchProcessInterface(QWidget):
         self.start_all_btn.clicked.connect(self.start_all_tasks)
         self.clear_btn.clicked.connect(self.clear_tasks)
         self.task_type_combo.currentTextChanged.connect(self.on_task_type_changed)
+
+    def _open_plan(self):
+        window = self.window()
+        if hasattr(window, "homeInterface"):
+            home = window.homeInterface  # type: ignore
+            window.switchTo(home)  # type: ignore
+            home.stackedWidget.setCurrentWidget(home.task_creation_interface)
 
     def setup_connections(self):
         # 批处理线程信号连接

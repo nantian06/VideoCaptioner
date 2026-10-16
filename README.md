@@ -6,6 +6,8 @@
   [在线文档](https://weifeng2333.github.io/VideoCaptioner/) · [CLI 使用](#cli-命令行) · [GUI 桌面版](#gui-桌面版) · [Claude Code Skill](#claude-code-skill)
 </div>
 
+> **本地中文定制版（nantian06/VideoCaptioner）**：新增离线的 SenseVoice / Fun-ASR-Nano 中文识别，支持 N 卡加速并可自动回退 CPU，流程也按使用习惯重新梳理过。安装和用法见 **[README_LOCAL.md](README_LOCAL.md)**，更新记录见 [CHANGELOG.md](CHANGELOG.md)。下面是原版说明。
+
 ## 安装
 
 ```bash

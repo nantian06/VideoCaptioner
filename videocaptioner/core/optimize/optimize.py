@@ -147,6 +147,8 @@ class SubtitleOptimizer:
                 optimized_dict.update(result)
             except Exception as e:
                 logger.error(f"Optimization batch failed: {str(e)}")
+                self.failed_batches = getattr(self, "failed_batches", 0) + 1
+                self.last_error = str(e)
                 optimized_dict.update(chunk)  # 失败时保留原文
 
         return optimized_dict
@@ -182,6 +184,9 @@ class SubtitleOptimizer:
 
         except Exception as e:
             logger.error(f"Optimization failed: {str(e)}")
+            # 记下失败批次，界面会提示「有 N 批没校正成功」，而不是假装全部完成
+            self.failed_batches = getattr(self, "failed_batches", 0) + 1
+            self.last_error = str(e)
             return subtitle_chunk
 
     def agent_loop(self, subtitle_chunk: Dict[str, str]) -> Dict[str, str]:

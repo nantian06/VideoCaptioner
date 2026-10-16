@@ -116,11 +116,40 @@ class LLMServiceEnum(Enum):
 class TranscribeModelEnum(Enum):
     """转录模型"""
 
+    LOCAL = "本地中文识别 ✨"
     BIJIAN = "B 接口"
     JIANYING = "J 接口"
     WHISPER_API = "Whisper [API] ✨"
     FASTER_WHISPER = "FasterWhisper ✨"
     WHISPER_CPP = "WhisperCpp"
+
+
+class LocalASRModelEnum(Enum):
+    """本地识别模型（sherpa-onnx）"""
+
+    SENSEVOICE = "sensevoice"
+    FUNASR_NANO = "funasr-nano"
+
+
+LOCAL_ASR_MODEL_LABELS = {
+    LocalASRModelEnum.SENSEVOICE: "SenseVoice（快，CPU 也能实时）",
+    LocalASRModelEnum.FUNASR_NANO: "Fun-ASR-Nano（更准，建议 N 卡）",
+}
+
+
+class LocalDeviceEnum(Enum):
+    """本地识别运行设备"""
+
+    AUTO = "auto"
+    CUDA = "cuda"
+    CPU = "cpu"
+
+
+LOCAL_DEVICE_LABELS = {
+    LocalDeviceEnum.AUTO: "自动（有 N 卡用 GPU，否则 CPU）",
+    LocalDeviceEnum.CUDA: "GPU（CUDA）",
+    LocalDeviceEnum.CPU: "CPU",
+}
 
 
 class TranslatorServiceEnum(Enum):
@@ -479,6 +508,16 @@ def _get_all_languages_except_auto() -> list[TranscribeLanguageEnum]:
 
 
 ASR_LANGUAGE_CAPABILITIES: dict[TranscribeModelEnum, ASRLanguageCapability] = {
+    TranscribeModelEnum.LOCAL: ASRLanguageCapability(
+        supported_languages=[
+            TranscribeLanguageEnum.CHINESE,
+            TranscribeLanguageEnum.ENGLISH,
+            TranscribeLanguageEnum.JAPANESE,
+            TranscribeLanguageEnum.KOREAN,
+            TranscribeLanguageEnum.YUE,
+        ],
+        supports_auto=True,
+    ),
     TranscribeModelEnum.BIJIAN: ASRLanguageCapability(
         supported_languages=[
             TranscribeLanguageEnum.CHINESE,
@@ -573,6 +612,16 @@ class TranscribeConfig:
     faster_whisper_ff_mdx_kim2: bool = False
     faster_whisper_one_word: bool = True
     faster_whisper_prompt: Optional[str] = None
+    # 本地中文识别（sherpa-onnx）配置
+    local_model: str = "sensevoice"
+    local_device: str = "auto"
+    local_hotwords: str = ""
+    local_num_threads: int = 0
+    local_models_dir: str = ""
+    local_download_source: str = "auto"
+    local_custom_mirror: str = ""
+    local_max_chars: int = 25
+    local_vad_threshold: float = 0.5
 
     def _mask_key(self, key: Optional[str]) -> str:
         """Mask sensitive key for display"""
@@ -591,6 +640,12 @@ class TranscribeConfig:
         lines.append(
             f"Output Format: {self.output_format.value if self.output_format else 'None'}"
         )
+
+        if self.transcribe_model == TranscribeModelEnum.LOCAL:
+            lines.append(f"Local Model: {self.local_model}")
+            lines.append(f"Device: {self.local_device}")
+            if self.local_hotwords:
+                lines.append(f"Hotwords: {self.local_hotwords[:40]}")
 
         if self.transcribe_model == TranscribeModelEnum.WHISPER_API:
             lines.append(f"API Base: {self.whisper_api_base}")

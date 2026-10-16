@@ -99,6 +99,25 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     verbosity.add_argument("-q", "--quiet", action="store_true", help="Quiet mode (only output result path)")
 
 
+def _add_local_asr_options(group) -> None:
+    """本地中文识别（--asr local）的参数。"""
+    group.add_argument("--local-model", choices=["sensevoice", "funasr-nano"],
+                       help="Local model: sensevoice (fast, default) or funasr-nano (more accurate, GPU recommended)")
+    group.add_argument("--device", dest="local_device", choices=["auto", "cuda", "cpu"],
+                       help="Device for --asr local (default: auto = NVIDIA GPU if usable, else CPU)")
+    group.add_argument("--hotwords", metavar="WORDS",
+                       help="Comma-separated hotwords for funasr-nano, e.g. streamer names or product names")
+    group.add_argument("--threads", dest="local_threads", type=int, metavar="N",
+                       help="CPU threads for --asr local (default: auto)")
+    group.add_argument("--models-dir", dest="local_models_dir", metavar="DIR",
+                       help="Where local models are stored / downloaded")
+    group.add_argument("--download-source", dest="local_download_source",
+                       choices=["auto", "github", "ghfast", "ghproxy", "custom"],
+                       help="Model download source (default: auto = China mirrors first, then GitHub)")
+    group.add_argument("--max-chars", dest="local_max_chars", type=int, metavar="N",
+                       help="Max Chinese characters per subtitle line when not using LLM split (default: 25)")
+
+
 def _build_transcribe_parser(subparsers) -> None:
     p = subparsers.add_parser(
         "transcribe",
@@ -112,10 +131,10 @@ def _build_transcribe_parser(subparsers) -> None:
     asr = p.add_argument_group("ASR options")
     asr.add_argument(
         "--asr",
-        choices=["bijian", "jianying", "whisper-api", "whisper-cpp"],
-        help="ASR engine (default: bijian). "
-             "bijian/jianying: free, no setup, Chinese & English only. "
-             "For other languages use whisper-api or whisper-cpp",
+        choices=["local", "bijian", "jianying", "whisper-api", "whisper-cpp", "faster-whisper"],
+        help="ASR engine (default: local). "
+             "local: offline SenseVoice / Fun-ASR-Nano, best for Chinese with some English; "
+             "bijian/jianying: free cloud, Chinese & English only",
     )
     asr.add_argument("--language", metavar="CODE",
                      help="Source language as ISO 639-1 code, or 'auto' (default: auto)")
@@ -126,6 +145,7 @@ def _build_transcribe_parser(subparsers) -> None:
     asr.add_argument("--whisper-api-base", metavar="URL",
                      help="Whisper API base URL")
 
+    _add_local_asr_options(asr)
     asr.add_argument("--whisper-model", metavar="NAME",
                      help="Model name for whisper-api (default: whisper-1) "
                           "or whisper-cpp (default: large-v2)")
@@ -353,8 +373,9 @@ def _build_process_parser(subparsers) -> None:
     pipe.add_argument("--dub", action="store_true", help="Generate dubbed audio/video after subtitle processing")
     pipe.add_argument("--dub-only", action="store_true", help="Output only the dubbed result, skipping subtitle burn/embedding")
 
-    pipe.add_argument("--asr", choices=["bijian", "jianying", "whisper-api", "whisper-cpp"],
-                      help="ASR engine (default: bijian)")
+    pipe.add_argument("--asr", choices=["local", "bijian", "jianying", "whisper-api", "whisper-cpp", "faster-whisper"],
+                      help="ASR engine (default: local)")
+    _add_local_asr_options(pipe)
     pipe.add_argument("--language", metavar="CODE",
                       help="Source language as ISO 639-1 code, or 'auto' (default: auto)")
     pipe.add_argument("--whisper-api-key", metavar="KEY", help="Whisper API key (for --asr whisper-api)")
@@ -455,7 +476,7 @@ def _build_config_parser(subparsers) -> None:
     init_p.add_argument("--llm-api-key", metavar="KEY", help="LLM API key")
     init_p.add_argument("--llm-api-base", metavar="URL", help="LLM API base URL")
     init_p.add_argument("--llm-model", metavar="NAME", help="LLM model")
-    init_p.add_argument("--asr", choices=["bijian", "jianying", "whisper-api", "whisper-cpp"], help="Default ASR engine")
+    init_p.add_argument("--asr", choices=["local", "bijian", "jianying", "whisper-api", "whisper-cpp", "faster-whisper"], help="Default ASR engine")
     init_p.add_argument("--translator", choices=["llm", "bing", "google"], help="Default translation service")
     init_p.add_argument("--target-language", "--to", dest="target_language", metavar="CODE", help=argparse.SUPPRESS)
     init_p.add_argument("--no-optimize", action="store_true", help="Disable AI subtitle polish by default")
@@ -548,6 +569,15 @@ def _build_cli_overrides(args: argparse.Namespace) -> dict:
     # Transcribe
     _set("transcribe.asr", getattr(args, "asr", None))
     _set("transcribe.language", getattr(args, "language", None))
+
+    # Local ASR
+    _set("transcribe.local.model", getattr(args, "local_model", None))
+    _set("transcribe.local.device", getattr(args, "local_device", None))
+    _set("transcribe.local.hotwords", getattr(args, "hotwords", None))
+    _set("transcribe.local.num_threads", getattr(args, "local_threads", None))
+    _set("transcribe.local.models_dir", getattr(args, "local_models_dir", None))
+    _set("transcribe.local.download_source", getattr(args, "local_download_source", None))
+    _set("transcribe.local.max_chars", getattr(args, "local_max_chars", None))
 
     # FasterWhisper
     _set("transcribe.faster_whisper.model", getattr(args, "fw_model", None))

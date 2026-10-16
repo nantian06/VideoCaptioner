@@ -22,6 +22,8 @@ from videocaptioner.config import SETTINGS_PATH, WORK_PATH
 from videocaptioner.core.entities import (
     FasterWhisperModelEnum,
     LLMServiceEnum,
+    LocalASRModelEnum,
+    LocalDeviceEnum,
     SubtitleLayoutEnum,
     SubtitleRenderModeEnum,
     TranscribeLanguageEnum,
@@ -144,7 +146,7 @@ class Config(QConfig):
     transcribe_model = OptionsConfigItem(
         "Transcribe",
         "TranscribeModel",
-        TranscribeModelEnum.BIJIAN,
+        TranscribeModelEnum.LOCAL,
         PlatformAwareTranscribeModelValidator(),
         EnumSerializer(TranscribeModelEnum),
     )
@@ -158,9 +160,43 @@ class Config(QConfig):
     transcribe_language = OptionsConfigItem(
         "Transcribe",
         "TranscribeLanguage",
-        TranscribeLanguageEnum.AUTO,
+        TranscribeLanguageEnum.CHINESE,
         OptionsValidator(TranscribeLanguageEnum),
         EnumSerializer(TranscribeLanguageEnum),
+    )
+
+    # ------------------- 本地中文识别（sherpa-onnx）配置 -------------------
+    local_model = OptionsConfigItem(
+        "LocalASR",
+        "Model",
+        LocalASRModelEnum.SENSEVOICE,
+        OptionsValidator(LocalASRModelEnum),
+        EnumSerializer(LocalASRModelEnum),
+    )
+    local_device = OptionsConfigItem(
+        "LocalASR",
+        "Device",
+        LocalDeviceEnum.AUTO,
+        OptionsValidator(LocalDeviceEnum),
+        EnumSerializer(LocalDeviceEnum),
+    )
+    local_hotwords = ConfigItem("LocalASR", "Hotwords", "")
+    local_num_threads = RangeConfigItem(
+        "LocalASR", "NumThreads", 0, RangeValidator(0, 64)
+    )
+    local_models_dir = ConfigItem("LocalASR", "ModelsDir", "")
+    local_download_source = OptionsConfigItem(
+        "LocalASR",
+        "DownloadSource",
+        "auto",
+        OptionsValidator(["auto", "github", "ghfast", "ghproxy", "custom"]),
+    )
+    local_custom_mirror = ConfigItem("LocalASR", "CustomMirror", "")
+    local_max_chars = RangeConfigItem(
+        "LocalASR", "MaxChars", 25, RangeValidator(8, 60)
+    )
+    local_vad_threshold = RangeConfigItem(
+        "LocalASR", "VadThreshold", 0.5, RangeValidator(0.1, 0.9)
     )
 
     # ------------------- Whisper Cpp 配置 -------------------
@@ -240,8 +276,8 @@ class Config(QConfig):
     custom_prompt_text = ConfigItem("Subtitle", "CustomPromptText", "")
 
     # ------------------- 字幕合成配置 -------------------
-    soft_subtitle = ConfigItem("Video", "SoftSubtitle", False, BoolValidator())
-    need_video = ConfigItem("Video", "NeedVideo", True, BoolValidator())
+    soft_subtitle = ConfigItem("Video", "SoftSubtitle", True, BoolValidator())
+    need_video = ConfigItem("Video", "NeedVideo", False, BoolValidator())
     video_quality = OptionsConfigItem(
         "Video",
         "VideoQuality",

@@ -140,8 +140,11 @@ class VideoInfoCard(CardWidget):
         self.button_layout = QVBoxLayout()
         self.open_folder_button = PushButton(self.tr("打开文件夹"), self)
         self.start_button = PrimaryPushButton(self.tr("开始转录"), self)
+        self.cancel_button = PushButton(self.tr("取消转录"), self)
+        self.cancel_button.hide()
         self.button_layout.addWidget(self.open_folder_button)
         self.button_layout.addWidget(self.start_button)
+        self.button_layout.addWidget(self.cancel_button)
 
         self.start_button.setDisabled(True)
 
@@ -255,6 +258,20 @@ class VideoInfoCard(CardWidget):
     def setup_signals(self) -> None:
         self.start_button.clicked.connect(self.on_start_button_clicked)
         self.open_folder_button.clicked.connect(self.on_open_folder_clicked)
+        self.cancel_button.clicked.connect(self.on_cancel_clicked)
+
+    def on_cancel_clicked(self):
+        """请求取消转录（本地识别会在当前批次结束后停下）"""
+        thread = getattr(self, "transcript_thread", None)
+        if thread is not None and thread.isRunning():
+            thread.stop_event.set()
+            self.cancel_button.setEnabled(False)
+            self.cancel_button.setText(self.tr("正在取消…"))
+
+    def on_transcript_cancelled(self):
+        self.transcription_interface.is_processing = False  # type: ignore
+        self.reset_ui()
+        self.start_button.setText(self.tr("已取消，可重新转录"))
 
     def on_start_button_clicked(self):
         """开始转录按钮点击事件"""
@@ -299,7 +316,11 @@ class VideoInfoCard(CardWidget):
         self.transcript_thread.finished.connect(self.on_transcript_finished)
         self.transcript_thread.progress.connect(self.on_transcript_progress)
         self.transcript_thread.error.connect(self.on_transcript_error)
+        self.transcript_thread.cancelled.connect(self.on_transcript_cancelled)
         self.transcript_thread.start()
+        self.cancel_button.setText(self.tr("取消转录"))
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
 
     def on_transcript_progress(self, value, message):
         """更新转录进度"""
@@ -312,6 +333,7 @@ class VideoInfoCard(CardWidget):
         self.start_button.setEnabled(True)
         self.start_button.setText(self.tr("重新转录"))
         self.progress_ring.hide()
+        self.cancel_button.hide()
         InfoBar.error(
             self.tr("转录失败"),
             self.tr(error),
@@ -324,6 +346,7 @@ class VideoInfoCard(CardWidget):
         self.start_button.setEnabled(True)
         self.start_button.setText(self.tr("转录完成"))
         self.progress_ring.hide()
+        self.cancel_button.hide()
         self.finished.emit(task)
 
     def reset_ui(self):
@@ -332,6 +355,7 @@ class VideoInfoCard(CardWidget):
         self.start_button.setText(self.tr("开始转录"))
         self.progress_ring.setValue(0)
         self.progress_ring.hide()
+        self.cancel_button.hide()
 
     def set_task(self, task):
         """设置任务并更新UI"""
@@ -340,7 +364,7 @@ class VideoInfoCard(CardWidget):
 
     def stop(self):
         if hasattr(self, "transcript_thread"):
-            self.transcript_thread.terminate()
+            self.transcript_thread.stop()
 
 
 class TranscriptionInterface(QWidget):

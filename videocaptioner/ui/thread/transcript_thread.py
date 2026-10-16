@@ -1,5 +1,6 @@
 import datetime
 import tempfile
+import threading
 from pathlib import Path
 
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -16,10 +17,19 @@ class TranscriptThread(QThread):
     finished = pyqtSignal(TranscribeTask)
     progress = pyqtSignal(int, str)
     error = pyqtSignal(str)
+    cancelled = pyqtSignal()
 
     def __init__(self, task: TranscribeTask):
         super().__init__()
         self.task = task
+        self.stop_event = threading.Event()
+
+    def stop(self, timeout_ms: int = 5000):
+        """请求停止。本地识别会在当前批次结束后退出；其它引擎超时后强制结束线程。"""
+        self.stop_event.set()
+        if not self.wait(timeout_ms):
+            self.terminate()
+            self.wait(1000)
 
     def run(self):
         try:
@@ -35,6 +45,10 @@ class TranscriptThread(QThread):
             self._perform_transcription()
 
         except Exception as e:
+            if self.stop_event.is_set():
+                logger.info("转录已取消")
+                self.cancelled.emit()
+                return
             logger.exception("转录过程中发生错误: %s", str(e))
             self.error.emit(str(e))
             self.progress.emit(100, self.tr("转录失败"))
@@ -112,6 +126,7 @@ class TranscriptThread(QThread):
                 temp_audio_path,
                 self.task.transcribe_config,
                 callback=self.progress_callback,
+                stop_event=self.stop_event,
             )
 
             # 保存字幕文件（根据配置的输出格式）

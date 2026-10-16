@@ -286,7 +286,9 @@ class BatchProcessThread(QThread):
             self.threads.remove(batch_task.current_thread)
 
         # 字幕完成后创建视频合成任务
-        synthesis_task = self.factory.create_synthesis_task(video_path, subtitle_path)
+        synthesis_task = self.factory.create_synthesis_task(
+            video_path, subtitle_path, need_next_task=True
+        )
         thread = VideoSynthesisThread(synthesis_task)
         batch_task.current_thread = thread
 

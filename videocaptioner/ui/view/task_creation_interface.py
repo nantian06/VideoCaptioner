@@ -36,7 +36,7 @@ from videocaptioner.core.entities import (
     SupportedVideoFormats,
 )
 from videocaptioner.ui.common.config import cfg
-from videocaptioner.ui.components.DonateDialog import DonateDialog
+from videocaptioner.ui.components.RunPlanCard import RunPlanCard
 from videocaptioner.ui.thread.video_download_thread import VideoDownloadThread
 from videocaptioner.ui.view.log_window import LogWindow
 
@@ -49,6 +49,7 @@ class TaskCreationInterface(QWidget):
     """
 
     finished = pyqtSignal(str)  # 该信号用于在任务创建完成后通知主窗口
+    showTranscribeSettings = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -66,10 +67,11 @@ class TaskCreationInterface(QWidget):
     def setup_ui(self):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setObjectName("main_layout")
-        self.main_layout.setSpacing(50)
-        self.main_layout.addSpacing(120)
+        self.main_layout.setSpacing(16)
+        self.main_layout.addSpacing(20)
         self.setup_logo()
         self.setup_search_layout()
+        self.setup_plan_card()
         self.setup_status_layout()
         self.setup_info_label()
 
@@ -77,8 +79,8 @@ class TaskCreationInterface(QWidget):
         self.logo_label = QLabel(self)
         self.logo_pixmap = QPixmap(str(LOGO_PATH))
         self.logo_pixmap = self.logo_pixmap.scaled(
-            150,
-            150,
+            72,
+            72,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.SmoothTransformation,  # type: ignore
         )
@@ -137,7 +139,13 @@ class TaskCreationInterface(QWidget):
         self.search_layout.addWidget(self.start_button)
         self.search_layout.setSpacing(10)
         self.main_layout.addLayout(self.search_layout)
-        self.main_layout.addSpacing(100)
+
+    def setup_plan_card(self):
+        plan_layout = QHBoxLayout()
+        plan_layout.setContentsMargins(60, 0, 60, 0)
+        self.plan_card = RunPlanCard(self)
+        plan_layout.addWidget(self.plan_card)
+        self.main_layout.addLayout(plan_layout)
 
     def setup_status_layout(self):
         self.status_layout = QVBoxLayout()
@@ -174,22 +182,9 @@ class TaskCreationInterface(QWidget):
         """
         )
 
-        # 创建捐助按钮
-        self.donate_button = HyperlinkButton(url="", text=self.tr("捐助"), parent=self)
-        self.donate_button.setStyleSheet(
-            self.donate_button.styleSheet()
-            + """
-            QPushButton {
-                font-size: 12px;
-                color: #2F8D63;
-                text-decoration: underline;
-            }
-        """
-        )
-
         # 添加版权信息标签
         self.info_label = BodyLabel(
-            self.tr(f"©VideoCaptioner {VERSION} • By Weifeng"), self
+            self.tr(f"本地中文定制版 v{VERSION} · 基于 VideoCaptioner by Weifeng (GPL-3.0)"), self
         )
         self.info_label.setAlignment(Qt.AlignCenter)  # type: ignore
         self.info_label.setStyleSheet("font-size: 12px; color: #888888;")
@@ -198,7 +193,6 @@ class TaskCreationInterface(QWidget):
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.info_label)
         bottom_layout.addWidget(self.log_button)
-        bottom_layout.addWidget(self.donate_button)
         bottom_layout.addStretch()
 
         self.main_layout.addStretch()
@@ -207,8 +201,11 @@ class TaskCreationInterface(QWidget):
     def setup_signals(self):
         self.start_button.clicked.connect(self.on_start_clicked)
         self.search_input.textChanged.connect(self.on_search_input_changed)
+        self.search_input.textChanged.connect(self.plan_card.set_input)
+        self.plan_card.startRequested.connect(self.process)
+        self.plan_card.openTranscribeSettings.connect(self.showTranscribeSettings)
+        self.plan_card.openLLMSettings.connect(self._open_llm_settings)
         self.log_button.clicked.connect(self.show_log_window)
-        self.donate_button.clicked.connect(self.show_donate_dialog)
 
     def setup_values(self):
         self.search_input.setText("")
@@ -380,6 +377,11 @@ class TaskCreationInterface(QWidget):
                 parent=self,
             )
 
+    def _open_llm_settings(self):
+        window = self.window()
+        if hasattr(window, "settingInterface"):
+            window.switchTo(window.settingInterface)  # type: ignore
+
     def show_log_window(self):
         """显示日志窗口"""
         if self.log_window is None:
@@ -389,10 +391,6 @@ class TaskCreationInterface(QWidget):
         else:
             self.log_window.activateWindow()
 
-    def show_donate_dialog(self):
-        """显示捐助窗口"""
-        donate_dialog = DonateDialog(self)
-        donate_dialog.exec_()
 
 
 if __name__ == "__main__":

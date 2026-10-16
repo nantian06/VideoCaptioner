@@ -3,7 +3,7 @@ import os
 import shutil
 
 import psutil
-from PyQt5.QtCore import QSize, QThread, QUrl
+from PyQt5.QtCore import QSize, QUrl
 from PyQt5.QtGui import QDesktopServices, QIcon
 from PyQt5.QtWidgets import QApplication
 from qfluentwidgets import FluentIcon as FIF
@@ -19,8 +19,6 @@ from qfluentwidgets import (
 from videocaptioner.config import ASSETS_PATH, GITHUB_REPO_URL
 from videocaptioner.core.constant import INFOBAR_DURATION_FOREVER
 from videocaptioner.ui.common.config import cfg
-from videocaptioner.ui.components.DonateDialog import DonateDialog
-from videocaptioner.ui.thread.version_checker_thread import VersionChecker
 from videocaptioner.ui.view.batch_process_interface import BatchProcessInterface
 from videocaptioner.ui.view.home_interface import HomeInterface
 from videocaptioner.ui.view.llm_logs_interface import LLMLogsInterface
@@ -42,15 +40,7 @@ class MainWindow(FluentWindow):
         self.batchProcessInterface = BatchProcessInterface(self)
         self.llmLogsInterface = LLMLogsInterface(self)
 
-        # 初始化版本检查器
-        self.versionChecker = VersionChecker()
-        self.versionChecker.newVersionAvailable.connect(self.onNewVersion)
-        self.versionChecker.announcementAvailable.connect(self.onAnnouncement)
-
-        self.versionThread = QThread()
-        self.versionChecker.moveToThread(self.versionThread)
-        self.versionThread.started.connect(self.versionChecker.perform_check)
-        self.versionThread.start()
+        # 定制版：不在启动时联网检查版本、拉取公告，也没有远程禁用功能的开关
 
         # 初始化导航界面
         self.initNavigation()
@@ -124,53 +114,15 @@ class MainWindow(FluentWindow):
         w = MessageBox(
             self.tr("GitHub信息"),
             self.tr(
-                "VideoCaptioner 由本人在课余时间独立开发完成，目前托管在GitHub上，欢迎Star和Fork。项目诚然还有很多地方需要完善，遇到软件的问题或者BUG欢迎提交Issue。\n\n https://github.com/WEIFENG2333/VideoCaptioner"
+                "这是基于 VideoCaptioner（作者 Weifeng，GPL-3.0）的本地中文定制版，"
+                "新增了离线的 SenseVoice / Fun-ASR-Nano 识别。\n\n上游项目：https://github.com/WEIFENG2333/VideoCaptioner"
             ),
             self,
         )
-        w.yesButton.setText(self.tr("打开 GitHub"))
-        w.cancelButton.setText(self.tr("支持作者"))
+        w.yesButton.setText(self.tr("打开上游 GitHub"))
+        w.cancelButton.setText(self.tr("关闭"))
         if w.exec():
             QDesktopServices.openUrl(QUrl(GITHUB_REPO_URL))
-        else:
-            # 点击"支持作者"按钮时打开捐赠对话框
-            donate_dialog = DonateDialog(self)
-            donate_dialog.exec_()
-
-    def onNewVersion(self, version, update_required, update_info, download_url):
-        """新版本提示"""
-        if update_required:
-            title = "发现新版本, 需要更新"
-            content = f"发现新版本 {version}\n\n" f"更新内容：\n{update_info}"
-        else:
-            title = "发现新版本"
-            content = f"发现新版本 {version}\n\n{update_info}"
-
-        w = MessageBox(title, content, self)
-        w.yesButton.setText("立即更新")
-        w.cancelButton.setText("稍后再说")
-
-        if w.exec() or update_required:
-            QDesktopServices.openUrl(QUrl(download_url))
-
-        if update_required:
-            self.homeInterface.setEnabled(False)
-            self.batchProcessInterface.setEnabled(False)
-            InfoBar.error(
-                title="需要更新",
-                content=self.tr("当前版本部分功能已被禁用。请尽快更新。"),
-                isClosable=False,
-                position=InfoBarPosition.BOTTOM,
-                duration=-1,
-                parent=self,
-            )
-
-    def onAnnouncement(self, content):
-        """显示公告"""
-        w = MessageBox("公告", content, self)
-        w.yesButton.setText("我知道了")
-        w.cancelButton.hide()
-        w.exec()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)

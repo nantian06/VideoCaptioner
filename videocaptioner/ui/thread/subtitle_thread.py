@@ -66,6 +66,7 @@ class SubtitleThread(QThread):
     update = pyqtSignal(dict)
     update_all = pyqtSignal(dict)
     error = pyqtSignal(str)
+    warning = pyqtSignal(str)  # 非致命问题（如部分批次校正失败）
 
     def __init__(self, task: SubtitleTask):
         super().__init__()
@@ -156,7 +157,7 @@ class SubtitleThread(QThread):
                 self.finished_subtitle_length = 0
                 if not subtitle_config.llm_model:
                     raise Exception(self.tr("LLM 模型未配置"))
-                optimizer = SubtitleOptimizer(
+                optimizer = self.optimizer = SubtitleOptimizer(
                     thread_num=subtitle_config.thread_num,
                     batch_num=subtitle_config.batch_size,
                     model=subtitle_config.llm_model,
@@ -164,6 +165,13 @@ class SubtitleThread(QThread):
                     update_callback=self.callback,
                 )
                 asr_data = optimizer.optimize_subtitle(asr_data)
+                failed = getattr(optimizer, "failed_batches", 0)
+                if failed:
+                    self.warning.emit(
+                        self.tr("有 {0} 批字幕校正失败，已保留原文。原因：{1}").format(
+                            failed, getattr(optimizer, "last_error", "")[:200]
+                        )
+                    )
                 asr_data.remove_punctuation()
                 self.update_all.emit(asr_data.to_json())
 
@@ -211,25 +219,23 @@ class SubtitleThread(QThread):
 
             # 6. 文件移动与清理
             if self.task.need_next_task and self.task.video_path:
-                # 保存srt/ass文件到视频目录（对于全流程任务）
-                save_srt_path = (
-                    Path(self.task.video_path).parent / f"{Path(self.task.video_path).stem}.srt"
-                )
+                # 全流程任务：最终 srt/ass 放到本次任务的输出文件夹（工作目录/<文件名>/），
+                # 不写到源视频旁边，避免覆盖用户原有的同名字幕
+                job_dir = Path(self.task.output_path).parent.parent
+                save_srt_path = job_dir / f"{Path(self.task.video_path).stem}.srt"
                 asr_data.to_srt(
                     save_path=str(save_srt_path),
                     layout=subtitle_config.subtitle_layout,
                 )
-                save_ass_path = (
-                    Path(self.task.video_path).parent / f"{Path(self.task.video_path).stem}.ass"
-                )
+                save_ass_path = job_dir / f"{Path(self.task.video_path).stem}.ass"
                 asr_data.to_ass(
                     save_path=str(save_ass_path),
                     layout=subtitle_config.subtitle_layout,
                     style_str=subtitle_config.subtitle_style,
                 )
 
-            self.progress.emit(100, self.tr("优化完成"))
-            logger.info("优化完成")
+            self.progress.emit(100, self.tr("字幕处理完成"))
+            logger.info("字幕处理完成")
             self.finished.emit(self.task.video_path, self.task.output_path)
 
         except Exception as e:

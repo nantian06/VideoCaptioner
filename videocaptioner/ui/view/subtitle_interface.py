@@ -37,6 +37,7 @@ from qfluentwidgets import FluentIcon as FIF
 from videocaptioner.config import SUBTITLE_STYLE_PATH
 from videocaptioner.core.asr.asr_data import ASRData
 from videocaptioner.core.constant import (
+    INFOBAR_DURATION_FOREVER,
     INFOBAR_DURATION_ERROR,
     INFOBAR_DURATION_INFO,
     INFOBAR_DURATION_SUCCESS,
@@ -464,8 +465,13 @@ class SubtitleInterface(QWidget):
 
         if need_create_task:
             # 将当前表格状态写回原文件，保留用户的合并/删除/编辑
+            # 不覆盖原文件（原文件可能是 .ass/.vtt，或流水线产出的【原始字幕】），另存一份再处理
             if self.model._data:
-                ASRData.from_json(self.model._data).to_srt(save_path=self.subtitle_path)
+                src = Path(self.subtitle_path)
+                stem = src.stem if src.stem.endswith("【编辑后】") else src.stem + "【编辑后】"
+                edited = src.with_name(stem + ".srt")
+                ASRData.from_json(self.model._data).to_srt(save_path=str(edited))
+                self.subtitle_path = str(edited)
             self.task = TaskFactory.create_subtitle_task(file_path=self.subtitle_path)
         if not self.task:
             self.start_button.setEnabled(True)
@@ -482,6 +488,15 @@ class SubtitleInterface(QWidget):
         self.subtitle_optimization_thread.update_all.connect(self.update_all)
         self.subtitle_optimization_thread.error.connect(
             self.on_subtitle_optimization_error
+        )
+        self.subtitle_optimization_thread.warning.connect(
+            lambda msg: InfoBar.warning(
+                self.tr("部分字幕未处理成功"),
+                msg,
+                duration=INFOBAR_DURATION_FOREVER,
+                position=InfoBarPosition.BOTTOM,
+                parent=self.parent(),
+            )
         )
         self.subtitle_optimization_thread.set_custom_prompt_text(
             self.custom_prompt_text
@@ -508,8 +523,8 @@ class SubtitleInterface(QWidget):
         if self.task and self.task.need_next_task:
             self.finished.emit(video_path, output_path)
         InfoBar.success(
-            self.tr("优化完成"),
-            self.tr("优化完成字幕..."),
+            self.tr("字幕处理完成"),
+            self.tr("断句、校正、翻译中开启的步骤都已完成"),
             duration=INFOBAR_DURATION_SUCCESS,
             position=InfoBarPosition.BOTTOM,
             parent=self.parent(),

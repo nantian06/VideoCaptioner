@@ -528,7 +528,7 @@ class VideoSynthesisInterface(QWidget):
             file_path = Path(self.task.output_path)
             target_dir = str(
                 file_path.parent
-                if file_path.exists()
+                if file_path.exists() or file_path.parent.exists()
                 else (
                     Path(str(self.task.video_path)).parent
                     if self.task.video_path

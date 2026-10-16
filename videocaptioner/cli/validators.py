@@ -159,7 +159,15 @@ def validate_whisper_cpp() -> bool:
 
 def validate_transcribe(config: dict) -> bool:
     """Validate config for transcribe command."""
-    asr = get(config, "transcribe.asr", "faster-whisper")
+    asr = get(config, "transcribe.asr", "local")
+    if asr == "local":
+        try:
+            import sherpa_onnx  # noqa: F401
+        except ImportError:
+            output.error("sherpa-onnx is not installed; --asr local is unavailable")
+            output.hint("Re-run install_linux.sh / install_windows.bat, or: pip install sherpa-onnx")
+            return False
+        return True
 
     if asr == "whisper-api":
         return validate_whisper_api(config)
