@@ -266,13 +266,8 @@ _WEEKDAY_FIX = re.compile(r"(礼拜|星期|周)([1-6])(?!\d)")
 _WEEKDAY_ZH = dict(zip("123456", "一二三四五六"))
 
 
-def fix_itn(text: str) -> str:
-    """SenseVoice 的数字规整会把「礼拜二」变成「礼拜2」，这里改回来。"""
-    return _WEEKDAY_FIX.sub(lambda m: m.group(1) + _WEEKDAY_ZH[m.group(2)], text)
-
-
 def fix_units_itn(units: List[Unit]) -> List[Unit]:
-    """单元级的 fix_itn：「礼」「拜」「2」→「礼」「拜」「二」。"""
+    """单元级的 ITN 规整：SenseVoice 的数字规整会把「礼拜二」变成「礼拜2」，这里改回来。"""
     for i, u in enumerate(units):
         if u.kind == "num" and u.text in _WEEKDAY_ZH and i > 0:
             prev = "".join(x.text for x in units[max(0, i - 2) : i])

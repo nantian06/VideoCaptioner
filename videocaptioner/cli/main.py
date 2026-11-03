@@ -115,7 +115,11 @@ def _add_local_asr_options(group) -> None:
                        choices=["auto", "github", "ghfast", "ghproxy", "custom"],
                        help="Model download source (default: auto = China mirrors first, then GitHub)")
     group.add_argument("--max-chars", dest="local_max_chars", type=int, metavar="N",
-                       help="Max Chinese characters per subtitle line when not using LLM split (default: 25)")
+                       help="Max Chinese characters per subtitle line when not using LLM split (8-60, default: 25)")
+    group.add_argument("--vad-threshold", dest="local_vad_threshold", type=float, metavar="F",
+                       help="VAD speech threshold for --asr local (0.1-0.9, default: 0.5; higher = less background music)")
+    group.add_argument("--custom-mirror", dest="local_custom_mirror", metavar="URL",
+                       help="https:// mirror prefix prepended to the GitHub model URL when --download-source custom")
 
 
 def _build_transcribe_parser(subparsers) -> None:
@@ -578,6 +582,8 @@ def _build_cli_overrides(args: argparse.Namespace) -> dict:
     _set("transcribe.local.models_dir", getattr(args, "local_models_dir", None))
     _set("transcribe.local.download_source", getattr(args, "local_download_source", None))
     _set("transcribe.local.max_chars", getattr(args, "local_max_chars", None))
+    _set("transcribe.local.vad_threshold", getattr(args, "local_vad_threshold", None))
+    _set("transcribe.local.custom_mirror", getattr(args, "local_custom_mirror", None))
 
     # FasterWhisper
     _set("transcribe.faster_whisper.model", getattr(args, "fw_model", None))

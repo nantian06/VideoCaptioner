@@ -54,13 +54,19 @@ class LocalASR(BaseASR):
         )
         super().__init__(audio_input, use_cache, need_word_time_stamp)
 
-    # 长录音不整段读进内存：用文件大小 + 头尾采样做缓存 key
+    # 长录音不整段读进内存：用文件大小 + mtime + 头中尾采样做缓存 key。
+    # mtime 让「同大小、采样区未被改写」的原地修改（流复制剪切、元数据注入）
+    # 不再命中旧缓存；中段字节级改写且 mtime 不变的极端场景由采样兜底
     def _set_data(self):
         path = self.audio_input
         if not isinstance(path, str) or not os.path.exists(path):
             raise ValueError(f"音频文件不存在：{path}")
+        ext = os.path.splitext(path)[1].lstrip(".").lower()
+        if ext and ext not in self.SUPPORTED_SOUND_FORMAT:
+            # 不硬拒绝：ffmpeg 支持的格式比登记表宽；但要让用户知道后续报错的可能来源
+            logger.warning("扩展名 .%s 不在已验证列表里，若解码失败请先转成 wav/mp3", ext)
         size = os.path.getsize(path)
-        h = hashlib.md5(str(size).encode())
+        h = hashlib.md5(f"{size}:{os.stat(path).st_mtime_ns}".encode())
         with open(path, "rb") as f:
             h.update(f.read(_SAMPLE_BYTES))
             if size > _SAMPLE_BYTES * 2:
@@ -72,7 +78,12 @@ class LocalASR(BaseASR):
         self.crc32_hex = h.hexdigest()[:16]
 
     def _get_audio_duration(self) -> float:
-        return audio_duration(str(self.audio_input)) or 60.0
+        duration = audio_duration(str(self.audio_input))
+        if not duration:
+            # ffprobe 不在 PATH 时进度条会退化成恒 0%/99%，至少留痕
+            logger.warning("无法获取音频时长（ffprobe 不可用？），进度按 60s 估算")
+            return 60.0
+        return duration
 
     def _get_key(self) -> str:
         o = self.opts
