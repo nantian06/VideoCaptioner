@@ -138,13 +138,20 @@ def model_path(spec: ModelSpec, role: str, root: Path) -> Path:
 
 
 def is_installed(spec: ModelSpec, root: Path) -> bool:
-    """所有角色文件都存在且非空。空文件多半是坏下载残留，视为未安装。"""
+    """所有角色都就位：文件非空、目录非空，断链等异常状态视为未安装。
+
+    注意角色可能是目录（如 Fun-ASR-Nano 的 tokenizer 是 Qwen3-0.6B 目录），
+    Windows 上目录 st_size 恒为 0，不能用字节数判断，必须分开处理。
+    """
     for role in spec.files:
         p = model_path(spec, role, root)
         try:
-            if not p.exists() or p.stat().st_size == 0:
-                return False
-        except OSError:  # 断链等异常状态一律视为未安装
+            if p.is_dir():
+                if next(p.iterdir(), None) is None:
+                    return False  # 空目录多半是解压中断的残留
+            elif not p.exists() or p.stat().st_size == 0:
+                return False  # 空文件多半是坏下载残留
+        except OSError:
             return False
     return True
 
@@ -311,10 +318,16 @@ def download_model(
 ) -> Path:
     """下载并解压一个模型，返回模型所在路径。已存在则直接返回。
 
-    同一模型的并发调用在锁上排队，避免两个线程写坏同一个 .part 文件。
+    同一模型的并发调用在锁上排队，避免两个线程写坏同一个 .part 文件；
+    排队期间持续响应 stop_event，持有方异常退出（如被强制终止）时
+    等待方仍能被取消，不会钉死在锁上。
     """
     progress = progress or (lambda p, m: None)
-    with _spec_lock(spec.key):
+    lock = _spec_lock(spec.key)
+    while not lock.acquire(timeout=0.5):
+        if stop_event is not None and stop_event.is_set():
+            raise DownloadCancelled()
+    try:
         if is_installed(spec, root):
             return root / spec.dirname
         root.mkdir(parents=True, exist_ok=True)
@@ -350,6 +363,8 @@ def download_model(
             dest.unlink(missing_ok=True)
         progress(100, f"{spec.title} 已就绪")
         return root / spec.dirname
+    finally:
+        lock.release()
 
 
 def ensure_models(

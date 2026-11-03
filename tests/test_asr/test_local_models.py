@@ -3,6 +3,7 @@
 import hashlib
 import io
 import tarfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -136,6 +137,38 @@ def test_is_installed_rejects_empty_file(tmp_path: Path):
     assert M.is_installed(spec, tmp_path) is False
     p.write_bytes(GOOD)
     assert M.is_installed(spec, tmp_path) is True
+
+
+def test_is_installed_handles_directory_roles(tmp_path: Path):
+    """目录角色（如 Fun-ASR-Nano 的 Qwen3-0.6B tokenizer）不能用字节数判断：
+    Windows 上目录 st_size 恒为 0，按文件逻辑会永远误报未安装。"""
+    spec = M.ModelSpec(
+        key="nano-fake",
+        family="funasr-nano",
+        title="目录角色模型",
+        asset="asr-models/nano.tar.bz2",
+        dirname="nano",
+        files={"tokenizer": "Qwen3-0.6B"},
+    )
+    d = M.model_path(spec, "tokenizer", tmp_path)
+    assert M.is_installed(spec, tmp_path) is False  # 目录不存在
+    d.mkdir(parents=True)
+    assert M.is_installed(spec, tmp_path) is False  # 空目录：解压中断的残留
+    (d / "tokenizer_config.json").write_text("{}")
+    assert M.is_installed(spec, tmp_path) is True
+
+
+def test_download_lock_wait_respects_stop_event(monkeypatch, tmp_path: Path):
+    """锁被别的下载占着时，等待方应能被 stop_event 取消，而不是钉死在锁上
+    （持有方可能已被 UI 强制终止，永远不释放）。"""
+    spec = _spec()
+    lock = M._spec_lock(spec.key)
+    assert lock.acquire(timeout=0)
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(M.DownloadCancelled):
+        M.download_model(spec, tmp_path, stop_event=stop)
+    lock.release()
 
 
 # ---------- _extract：tar 成员过滤 ----------
