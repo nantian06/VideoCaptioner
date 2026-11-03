@@ -361,7 +361,9 @@ class BatchProcessThread(QThread):
             except TypeError:
                 pass  # 本来就没有连接
         try:
-            thread.finished.connect(thread.deleteLater)
+            finished = getattr(thread, "finished", None)
+            if finished is not None:
+                finished.connect(thread.deleteLater)
         except RuntimeError:
             pass
         self.zombie_threads.append(thread)
