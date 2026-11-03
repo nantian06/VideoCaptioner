@@ -8,6 +8,9 @@ from videocaptioner.cli import exit_codes as EXIT
 from videocaptioner.cli import output
 from videocaptioner.cli.config import get
 from videocaptioner.cli.validators import validate_transcribe
+from videocaptioner.core.utils.logger import setup_logger
+
+logger = setup_logger("cli_transcribe")
 
 
 def run(args: Namespace, config: dict) -> int:
@@ -97,6 +100,19 @@ def run(args: Namespace, config: dict) -> int:
     wcpp_model_str = get(config, "transcribe.whisper_cpp.model", "large-v2")
     wcpp_model_enum = next((m for m in WhisperModelEnum if m.value == wcpp_model_str), None)
 
+
+def _clamp(value, lo, hi, name):
+    """数值配置钳到 UI 端 RangeValidator 同款范围，越界记日志。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return value
+    if v < lo or v > hi:
+        clamped = min(max(v, lo), hi)
+        logger.warning("%s=%s 超出范围 [%s, %s]，已钳到 %s", name, v, lo, hi, clamped)
+        return clamped
+    return value
+
     transcribe_config = TranscribeConfig(
         transcribe_model=asr_map.get(asr_engine),
         transcribe_language=language if language != "auto" else "",
@@ -126,7 +142,8 @@ def run(args: Namespace, config: dict) -> int:
         local_models_dir=get(config, "transcribe.local.models_dir", ""),
         local_download_source=get(config, "transcribe.local.download_source", "auto"),
         local_custom_mirror=get(config, "transcribe.local.custom_mirror", ""),
-        local_max_chars=int(get(config, "transcribe.local.max_chars", 25) or 25),
+        local_max_chars=int(_clamp(get(config, "transcribe.local.max_chars", 25) or 25, 8, 60, "transcribe.local.max_chars")),
+        local_vad_threshold=float(_clamp(get(config, "transcribe.local.vad_threshold", 0.5) or 0.5, 0.1, 0.9, "transcribe.local.vad_threshold")),
     )
 
 

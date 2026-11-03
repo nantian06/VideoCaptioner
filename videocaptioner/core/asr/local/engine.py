@@ -142,6 +142,15 @@ class LocalEngine:
             logger.warning("GPU 加载模型失败，回退到 CPU：%s", e)
             self.decision = DeviceDecision("cpu", f"GPU 加载模型失败（{e}），已回退到 CPU")
             progress(0, self.decision.reason)
+            # 重新按 CPU 选型（int8 变体）：GPU 精度模型在 CPU 上慢数倍且内存翻倍。
+            # 若对应精度已在本地则 pick_variant 直接复用，不会重复下载
+            self.sv_spec = M.pick_variant("sensevoice", "cpu", self.root)
+            if o.model == "funasr-nano":
+                self.nano_spec = M.pick_variant("funasr-nano", "cpu", self.root)
+            needed = [self.sv_spec]
+            if self.nano_spec is not None:
+                needed.append(self.nano_spec)
+            M.ensure_models(needed, self.root, progress, o.download_source, o.custom_mirror, stop_event)
             self._load("cpu")
         logger.info("模型加载完成，用时 %.1fs", time.time() - t)
 
@@ -153,7 +162,8 @@ class LocalEngine:
         # SenseVoice 的自动语种检测会把中英夹杂的直播误判成日语（「礼拜二」→「礼バ二」）。
         # 用 zh 模式英文照样能识别，所以「自动」按中文处理；纯日/韩/粤语请明确选语言。
         lang = self.opts.language if self.opts.language in SV_LANGS else "zh"
-        assert self.sv_spec is not None
+        if self.sv_spec is None:
+            raise RuntimeError("模型尚未准备就绪（sv_spec 为空），请先调用 prepare()")
         sv = self.sv_spec
         sv_key = ("sv", sv.key, dev, threads, lang)
         self.sv = _Recognizers.get(
@@ -255,7 +265,8 @@ class LocalEngine:
         stderr_tail: deque = deque(maxlen=50)
 
         def _drain_stderr() -> None:
-            assert proc.stderr is not None
+            if proc.stderr is None:  # python -O 下 assert 会失效，改为显式检查
+                return
             for raw_line in iter(proc.stderr.readline, b""):
                 stderr_tail.append(raw_line.decode("utf-8", "replace").rstrip())
 
@@ -358,9 +369,3 @@ class _Ring:
             return None
         data = np.concatenate(list(self.blocks))
         return data[ia - start_avail : ib - start_avail].copy()
-
-
-def plain_units(text: str, start: float, end: float) -> List[Unit]:
-    from .align import _spread
-
-    return _spread(split_text(text), start, end)

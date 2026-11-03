@@ -85,6 +85,7 @@ DEFAULTS: Dict[str, Any] = {
             "download_source": "auto",
             "custom_mirror": "",
             "max_chars": 25,
+            "vad_threshold": 0.5,
         },
         "faster_whisper": {
             "model": "large-v3",
