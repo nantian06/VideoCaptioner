@@ -1,3 +1,4 @@
+import inspect
 import queue
 import time
 from functools import partial
@@ -326,10 +327,20 @@ class BatchProcessThread(QThread):
     def stop_all(self):
         self.is_running = False
         # 停止所有线程：只设协作取消标志并有限等待，绝不在 GUI 线程无限 wait——
-        # 云端引擎收不到取消事件，可能还要跑几十秒，无限等会把界面冻死
+        # 云端引擎收不到取消事件，可能还要跑几十秒，无限等会把界面冻死。
+        # 各 worker 的 stop 签名不同（TranscriptThread 支持 timeout_ms，
+        # SubtitleThread 无参，VideoSynthesisThread 没有 stop），按签名分派
         for thread in self.threads:
-            if hasattr(thread, "stop"):
-                thread.stop(timeout_ms=1000)  # type: ignore
+            stop = getattr(thread, "stop", None)
+            if callable(stop):
+                try:
+                    accepts_timeout = "timeout_ms" in inspect.signature(stop).parameters
+                except (TypeError, ValueError):
+                    accepts_timeout = False
+                if accepts_timeout:
+                    stop(timeout_ms=1000)  # type: ignore
+                else:
+                    stop()  # type: ignore
             if thread.isRunning():
                 self._retire_thread(thread)
         self.threads.clear()
