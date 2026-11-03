@@ -75,6 +75,9 @@ def test_retire_uses_native_finished_not_shadowed_signal():
     class Shadowed(QThread):
         finished = pyqtSignal(int)  # 遮蔽原生信号，且 run() 里从不发射它
 
+        def run(self):
+            pass  # 默认 run() 是 exec() 事件循环、永不结束，这里立即返回
+
     batch = _make_batch()
     t = Shadowed()
     batch.threads = [t]
