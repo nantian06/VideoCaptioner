@@ -109,3 +109,25 @@ def test_cli_clamp():
     assert _clamp(1, 8, 60, "x") == 8
     assert _clamp(25, 8, 60, "x") == 25
     assert _clamp("bad", 8, 60, "x") == "bad"  # 非数值原样返回，交给后续校验
+
+
+def test_transcribe_run_structure():
+    """结构回归：run() 必须包含转录配置构造与执行主流程，_clamp 在模块层。
+    （曾因脚本插桩把 run() 腰斩、转录逻辑变成 _clamp 内不可达代码）"""
+    import ast
+
+    import videocaptioner.cli.commands.transcribe as T
+
+    src = Path(T.__file__).read_text()
+    tree = ast.parse(src)
+    run_fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run")
+    assigns = {
+        n.targets[0].id
+        for n in ast.walk(run_fn)
+        if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
+    }
+    assert "transcribe_config" in assigns, "run() 里必须有转录配置构造"
+    calls = {getattr(n.func, "id", getattr(n.func, "attr", "")) for n in ast.walk(run_fn) if isinstance(n, ast.Call)}
+    assert "transcribe" in calls, "run() 里必须调用识别入口"
+    top_functions = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+    assert "_clamp" in top_functions, "_clamp 应是模块级函数"

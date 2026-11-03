@@ -13,6 +13,20 @@ from videocaptioner.core.utils.logger import setup_logger
 logger = setup_logger("cli_transcribe")
 
 
+
+def _clamp(value, lo, hi, name):
+    """数值配置钳到 UI 端 RangeValidator 同款范围，越界记日志。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return value
+    if v < lo or v > hi:
+        clamped = min(max(v, lo), hi)
+        logger.warning("%s=%s 超出范围 [%s, %s]，已钳到 %s", name, v, lo, hi, clamped)
+        return clamped
+    return value
+
+
 def run(args: Namespace, config: dict) -> int:
     from videocaptioner.cli.validators import validate_media_input
 
@@ -100,18 +114,6 @@ def run(args: Namespace, config: dict) -> int:
     wcpp_model_str = get(config, "transcribe.whisper_cpp.model", "large-v2")
     wcpp_model_enum = next((m for m in WhisperModelEnum if m.value == wcpp_model_str), None)
 
-
-def _clamp(value, lo, hi, name):
-    """数值配置钳到 UI 端 RangeValidator 同款范围，越界记日志。"""
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return value
-    if v < lo or v > hi:
-        clamped = min(max(v, lo), hi)
-        logger.warning("%s=%s 超出范围 [%s, %s]，已钳到 %s", name, v, lo, hi, clamped)
-        return clamped
-    return value
 
     transcribe_config = TranscribeConfig(
         transcribe_model=asr_map.get(asr_engine),
