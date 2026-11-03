@@ -250,6 +250,17 @@ class LocalEngine:
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         assert proc.stdout is not None
+        # stderr 必须持续排空，否则缓冲区写满后 ffmpeg 会阻塞，连累 stdout 一起卡死。
+        # 用后台线程收进 deque，只留最后几十行供报错用。
+        stderr_tail: deque = deque(maxlen=50)
+
+        def _drain_stderr() -> None:
+            assert proc.stderr is not None
+            for raw_line in iter(proc.stderr.readline, b""):
+                stderr_tail.append(raw_line.decode("utf-8", "replace").rstrip())
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
         window = 512  # silero 的窗口大小
         leftover = np.zeros(0, dtype=np.float32)
         try:
@@ -277,9 +288,14 @@ class LocalEngine:
             if proc.poll() is None:
                 proc.kill()
             proc.wait()
-        if proc.returncode not in (0, None, -9) and not results:
-            err = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
-            raise RuntimeError(f"ffmpeg 解码音频失败：{err[-300:]}")
+            stderr_thread.join(timeout=5)
+        if proc.returncode not in (0, None, -9):
+            err = "".join(stderr_tail)
+            if not results:
+                raise RuntimeError(f"ffmpeg 解码音频失败：{err[-300:]}")
+            # 中途失败但已解出部分结果：如实报告，不冒充完整成功
+            logger.error("ffmpeg 解码中途失败（returncode=%s），字幕可能不完整：%s", proc.returncode, err[-300:])
+            progress(99, "ffmpeg 解码中途失败，生成的字幕可能不完整")
         elapsed = time.time() - started
         logger.info(
             "识别完成：%d 段，音频 %.0fs，用时 %.0fs（%s）", len(results), total, elapsed, dev_name
