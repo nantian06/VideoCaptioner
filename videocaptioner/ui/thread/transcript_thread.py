@@ -2,11 +2,17 @@ import datetime
 import tempfile
 import threading
 from pathlib import Path
+from typing import Optional
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from videocaptioner.core.asr import transcribe
-from videocaptioner.core.entities import TranscribeOutputFormatEnum, TranscribeTask
+from videocaptioner.core.asr.local.engine import TranscribeCancelled
+from videocaptioner.core.entities import (
+    TranscribeModelEnum,
+    TranscribeOutputFormatEnum,
+    TranscribeTask,
+)
 from videocaptioner.core.utils.logger import setup_logger
 from videocaptioner.core.utils.video_utils import video2audio
 
@@ -24,12 +30,17 @@ class TranscriptThread(QThread):
         self.task = task
         self.stop_event = threading.Event()
 
-    def stop(self, timeout_ms: int = 5000):
-        """请求停止。本地识别会在当前批次结束后退出；其它引擎超时后强制结束线程。"""
+    def stop(self, timeout_ms: int = 3000):
+        """请求停止（协作式）：设置取消标志并短暂等待线程退出。
+
+        不再 terminate() 强杀：强杀正在跑 native 推理 / ffmpeg 管道 /
+        模型下载的线程会崩溃，且不释放下载锁（卡死后续同模型下载）。
+        本地引擎会在下一个取消点（约 1 秒内）退出；云端引擎受网络
+        timeout 限制，最多再跑几十秒，随应用退出自然结束。
+        """
         self.stop_event.set()
-        if not self.wait(timeout_ms):
-            self.terminate()
-            self.wait(1000)
+        if timeout_ms > 0 and not self.wait(timeout_ms):
+            logger.warning("转录线程尚未退出，不再等待，由其自然结束")
 
     def run(self):
         try:
@@ -44,11 +55,12 @@ class TranscriptThread(QThread):
 
             self._perform_transcription()
 
+        except TranscribeCancelled:
+            logger.info("转录已取消")
+            self.cancelled.emit()
         except Exception as e:
-            if self.stop_event.is_set():
-                logger.info("转录已取消")
-                self.cancelled.emit()
-                return
+            # 取消后发生的异常仍是真实错误（如 ffmpeg 缺失、模型损坏），
+            # 如实上报，不再一律吞成「已取消」
             logger.exception("转录过程中发生错误: %s", str(e))
             self.error.emit(str(e))
             self.progress.emit(100, self.tr("转录失败"))
@@ -96,38 +108,48 @@ class TranscriptThread(QThread):
         assert self.task.output_path is not None
 
         video_path = Path(self.task.file_path)
-
-        self.progress.emit(5, self.tr("转换音频中"))
-        logger.info("开始转换音频")
-
-        # 创建临时音频文件（delete=False 避免 Windows 权限问题）
-        temp_audio_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        temp_audio_path = temp_audio_file.name
-        temp_audio_file.close()  # 立即关闭文件句柄，让 ffmpeg 可以写入
+        audio_path = str(video_path)
+        temp_audio_path: Optional[str] = None
 
         try:
-            # 转换音频文件
-            # 获取选中的音轨索引（如果有）
-            audio_track_index = self.task.selected_audio_track_index
-            is_success = video2audio(
-                str(video_path),
-                output=temp_audio_path,
-                audio_track_index=audio_track_index,
-            )
-            if not is_success:
-                logger.error("音频转换失败")
-                raise RuntimeError(self.tr("音频转换失败"))
+            if self.task.transcribe_config.transcribe_model == TranscribeModelEnum.LOCAL:
+                # 本地引擎自带 ffmpeg 流式解码，直接喂原文件，
+                # 省一次整段转码（几小时的录像等于解码两遍），也与 CLI 行为对齐
+                logger.info("本地识别：直接读取原文件，跳过整段转码")
+            else:
+                self.progress.emit(5, self.tr("转换音频中"))
+                logger.info("开始转换音频")
+
+                # 创建临时音频文件（delete=False 避免 Windows 权限问题）
+                temp_audio_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                temp_audio_path = temp_audio_file.name
+                temp_audio_file.close()  # 立即关闭文件句柄，让 ffmpeg 可以写入
+
+                # 获取选中的音轨索引（如果有）
+                audio_track_index = self.task.selected_audio_track_index
+                is_success = video2audio(
+                    str(video_path),
+                    output=temp_audio_path,
+                    audio_track_index=audio_track_index,
+                )
+                if not is_success:
+                    logger.error("音频转换失败")
+                    raise RuntimeError(self.tr("音频转换失败"))
 
             self.progress.emit(20, self.tr("语音转录中"))
             logger.info("开始语音转录")
 
             # 进行转录
             asr_data = transcribe(
-                temp_audio_path,
+                audio_path,
                 self.task.transcribe_config,
                 callback=self.progress_callback,
                 stop_event=self.stop_event,
             )
+
+            if self.stop_event.is_set():
+                # 用户点了取消但任务已跑完：如实按取消处理，不报「转录完成」
+                raise TranscribeCancelled()
 
             # 保存字幕文件（根据配置的输出格式）
             output_path = Path(self.task.output_path)
@@ -157,7 +179,8 @@ class TranscriptThread(QThread):
             self.progress.emit(100, self.tr("转录完成"))
             self.finished.emit(self.task)
         finally:
-            Path(temp_audio_path).unlink(missing_ok=True)
+            if temp_audio_path:
+                Path(temp_audio_path).unlink(missing_ok=True)
 
     def progress_callback(self, value, message):
         progress = min(20 + (value * 0.8), 100)

@@ -30,6 +30,7 @@ from videocaptioner.core.entities import (
     LocalDeviceEnum,
     TranscribeLanguageEnum,
 )
+from videocaptioner.core.utils.logger import setup_logger
 from videocaptioner.core.utils.platform_utils import open_folder
 from videocaptioner.ui.common.config import cfg
 from videocaptioner.ui.components.LineEditSettingCard import LineEditSettingCard
@@ -37,6 +38,8 @@ from videocaptioner.ui.components.SpinBoxSettingCard import (
     DoubleSpinBoxSettingCard,
     SpinBoxSettingCard,
 )
+
+logger = setup_logger("local_asr_settings")
 
 DOWNLOAD_SOURCE_LABELS = [
     "自动（先国内加速，再 GitHub）",
@@ -90,12 +93,17 @@ class ModelDownloadThread(QThread):
 class DeviceCheckThread(QThread):
     result = pyqtSignal(str, str)
 
+    def __init__(self):
+        super().__init__()
+        self.stop_event = threading.Event()
+
     def run(self):
         from videocaptioner.core.asr.local.device import resolve_device
 
         vad = M.model_path(M.MODEL_SPECS["silero-vad"], "model", models_root())
         d = resolve_device(cfg.local_device.value.value, vad if vad.exists() else None)
-        self.result.emit(d.device, d.reason)
+        if not self.stop_event.is_set():
+            self.result.emit(d.device, d.reason)
 
 
 class LocalModelManagerDialog(MessageBoxBase):
@@ -221,9 +229,13 @@ class LocalModelManagerDialog(MessageBoxBase):
         self._refresh_rows()
 
     def reject(self):
-        if self.download_thread is not None and self.download_thread.isRunning():
-            self.download_thread.stop_event.set()
-            self.download_thread.wait(3000)
+        # 关闭前回收两类后台线程：device 探测最长 90 秒（子进程 timeout），
+        # 不回收会出现「QThread: Destroyed while thread is still running」甚至段错误
+        for thread in (self.device_thread, self.download_thread):
+            if thread is not None and thread.isRunning():
+                thread.stop_event.set()
+                if not thread.wait(3000):
+                    logger.warning("对话框关闭时后台线程尚未退出，不再等待")
         super().reject()
 
 
