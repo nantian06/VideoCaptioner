@@ -1,3 +1,4 @@
+import inspect
 import queue
 import time
 from functools import partial
@@ -43,6 +44,7 @@ class BatchProcessThread(QThread):
         self.is_running = False
         self.factory = TaskFactory()
         self.threads = []  # 保存所有创建的线程
+        self.zombie_threads = []  # 停止时仍未退出的线程，断开信号后等其自然结束
 
     def add_task(self, task: BatchTask):
         self.task_queue.put(task)
@@ -324,13 +326,57 @@ class BatchProcessThread(QThread):
 
     def stop_all(self):
         self.is_running = False
-        # 停止所有线程
+        # 停止所有线程：只设协作取消标志并有限等待，绝不在 GUI 线程无限 wait——
+        # 云端引擎收不到取消事件，可能还要跑几十秒，无限等会把界面冻死。
+        # 各 worker 的 stop 签名不同（TranscriptThread 支持 timeout_ms，
+        # SubtitleThread 无参，VideoSynthesisThread 没有 stop），按签名分派
         for thread in self.threads:
-            if hasattr(thread, "stop"):
-                thread.stop()  # type: ignore
-            thread.wait()  # 等待线程结束
+            stop = getattr(thread, "stop", None)
+            if callable(stop):
+                try:
+                    accepts_timeout = "timeout_ms" in inspect.signature(stop).parameters
+                except (TypeError, ValueError):
+                    accepts_timeout = False
+                if accepts_timeout:
+                    stop(timeout_ms=1000)  # type: ignore
+                else:
+                    stop()  # type: ignore
+            if thread.isRunning():
+                self._retire_thread(thread)
         self.threads.clear()
         self.current_tasks.clear()
         # 清空任务队列
         with self.task_queue.mutex:
             self.task_queue.queue.clear()
+
+    def _retire_thread(self, thread: QThread):
+        """把退不下来的线程移交给僵尸列表：断开业务信号（UI 已清空，别再触碰），
+        线程真正退出后从僵尸列表移除并 deleteLater。QThread 对象由列表持有引用，
+        不会中途析构。"""
+        for sig_name in ("finished", "cancelled", "error", "progress"):
+            signal = getattr(thread, sig_name, None)
+            if signal is None:
+                continue
+            try:
+                signal.disconnect()
+            except TypeError:
+                pass  # 本来就没有连接
+
+        def _cleanup():
+            try:
+                self.zombie_threads.remove(thread)
+            except ValueError:
+                pass
+            thread.deleteLater()
+
+        # worker 子类普遍用自定义 finished 信号遮蔽了 QThread 原生生命周期信号
+        # （且在 run() 内部发射，若连它会与收尾清理竞态、取消/失败路径也到不了），
+        # 必须经 super 绑定拿原生 finished：线程真正退出时才触发清理
+        try:
+            native_finished = super(type(thread), thread).finished
+        except AttributeError:
+            native_finished = None
+        if native_finished is not None:
+            native_finished.connect(_cleanup)
+        self.zombie_threads.append(thread)
+        logger.warning("批量任务线程未能及时退出（云端引擎等网络层结束），已移交后台自然收尾")
