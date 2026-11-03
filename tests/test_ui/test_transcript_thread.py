@@ -122,24 +122,69 @@ def test_cancel_clicked_but_task_completes_reports_cancelled(tmp_path):
 def test_local_engine_reads_source_directly(tmp_path, monkeypatch, _no_real_transcribe):
     converted = []
     monkeypatch.setattr(tt, "video2audio", lambda *a, **k: converted.append(a) or True)
-    thread = tt.TranscriptThread(_make_task(tmp_path, TranscribeModelEnum.LOCAL))
+    task = _make_task(tmp_path, TranscribeModelEnum.LOCAL)
+    thread = tt.TranscriptThread(task)
     rec = Recorder()
     rec.wire(thread)
     thread.run()
     assert not converted, "本地引擎不应做整段 video2audio 转码"
-    assert _no_real_transcribe["audio_path"] == thread.task.file_path, "本地引擎应直接读原文件"
+    assert _no_real_transcribe["audio_path"] == task.file_path, "本地引擎应直接读原文件"
 
 
-def test_cloud_engine_still_converts(tmp_path, monkeypatch):
+def test_cloud_engine_converts_and_uses_wav(tmp_path, monkeypatch, _no_real_transcribe):
+    """云端引擎先转音频，且必须把转换出的临时 WAV 传给识别，不能拿原视频。"""
     converted = []
     monkeypatch.setattr(
         tt, "video2audio", lambda *a, **k: converted.append(a) or True
     )
-    thread = tt.TranscriptThread(_make_task(tmp_path, TranscribeModelEnum.BIJIAN))
+    task = _make_task(tmp_path, TranscribeModelEnum.BIJIAN)
+    thread = tt.TranscriptThread(task)
     rec = Recorder()
     rec.wire(thread)
     thread.run()
     assert len(converted) == 1, "云端引擎仍需要先转音频"
+    used = _no_real_transcribe["audio_path"]
+    assert used != task.file_path, "识别输入不能还是原视频文件"
+    assert used.endswith(".wav"), "识别输入应是转换出的临时 WAV"
+
+
+def test_local_with_selected_audio_track_still_converts(
+    tmp_path, monkeypatch, _no_real_transcribe
+):
+    """用户显式选了非默认音轨时，本地识别也要走转码来落实音轨选择。"""
+    converted = []
+    captured_kwargs = {}
+    monkeypatch.setattr(
+        tt,
+        "video2audio",
+        lambda *a, **k: captured_kwargs.update(k) or converted.append(a) or True,
+    )
+    task = _make_task(tmp_path, TranscribeModelEnum.LOCAL)
+    task.selected_audio_track_index = 1
+    thread = tt.TranscriptThread(task)
+    rec = Recorder()
+    rec.wire(thread)
+    thread.run()
+    assert len(converted) == 1, "选了非默认音轨就必须转码"
+    assert captured_kwargs.get("audio_track_index") == 1
+    assert _no_real_transcribe["audio_path"].endswith(".wav")
+
+
+def test_download_cancelled_reports_cancelled(tmp_path, monkeypatch):
+    """取消本地识别时，模型可能正在下载（抛 DownloadCancelled），应按取消处理。"""
+    thread = tt.TranscriptThread(_make_task(tmp_path, TranscribeModelEnum.LOCAL))
+    thread.stop_event.set()
+    rec = Recorder()
+    rec.wire(thread)
+
+    def cancelled_transcribe(audio_path, config, callback=None, stop_event=None):
+        from videocaptioner.core.asr.local.models import DownloadCancelled
+
+        raise DownloadCancelled()
+
+    monkeypatch.setattr(tt, "transcribe", cancelled_transcribe)
+    thread.run()
+    assert rec.cancelled and not rec.errors and not rec.finished
 
 
 # ---------- 协作式停止（#5）----------

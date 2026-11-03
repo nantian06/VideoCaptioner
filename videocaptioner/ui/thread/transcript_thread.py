@@ -8,6 +8,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 from videocaptioner.core.asr import transcribe
 from videocaptioner.core.asr.local.engine import TranscribeCancelled
+from videocaptioner.core.asr.local.models import DownloadCancelled
 from videocaptioner.core.entities import (
     TranscribeModelEnum,
     TranscribeOutputFormatEnum,
@@ -55,7 +56,8 @@ class TranscriptThread(QThread):
 
             self._perform_transcription()
 
-        except TranscribeCancelled:
+        except (TranscribeCancelled, DownloadCancelled):
+            # DownloadCancelled：取消本地识别时，模型可能正在下载或排队等下载锁
             logger.info("转录已取消")
             self.cancelled.emit()
         except Exception as e:
@@ -111,10 +113,16 @@ class TranscriptThread(QThread):
         audio_path = str(video_path)
         temp_audio_path: Optional[str] = None
 
+        # 本地引擎自带 ffmpeg 流式解码，track 0（默认音轨）时直接喂原文件，
+        # 省一次整段转码（几小时的录像等于解码两遍），也与 CLI 行为对齐；
+        # 用户显式选了其它音轨时仍需转码来落实音轨选择
+        use_local_direct = (
+            self.task.transcribe_config.transcribe_model == TranscribeModelEnum.LOCAL
+            and self.task.selected_audio_track_index == 0
+        )
+
         try:
-            if self.task.transcribe_config.transcribe_model == TranscribeModelEnum.LOCAL:
-                # 本地引擎自带 ffmpeg 流式解码，直接喂原文件，
-                # 省一次整段转码（几小时的录像等于解码两遍），也与 CLI 行为对齐
+            if use_local_direct:
                 logger.info("本地识别：直接读取原文件，跳过整段转码")
             else:
                 self.progress.emit(5, self.tr("转换音频中"))
@@ -135,6 +143,7 @@ class TranscriptThread(QThread):
                 if not is_success:
                     logger.error("音频转换失败")
                     raise RuntimeError(self.tr("音频转换失败"))
+                audio_path = temp_audio_path  # 后续识别必须用转换出的 WAV
 
             self.progress.emit(20, self.tr("语音转录中"))
             logger.info("开始语音转录")

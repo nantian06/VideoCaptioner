@@ -43,6 +43,7 @@ class BatchProcessThread(QThread):
         self.is_running = False
         self.factory = TaskFactory()
         self.threads = []  # 保存所有创建的线程
+        self.zombie_threads = []  # 停止时仍未退出的线程，断开信号后等其自然结束
 
     def add_task(self, task: BatchTask):
         self.task_queue.put(task)
@@ -324,13 +325,33 @@ class BatchProcessThread(QThread):
 
     def stop_all(self):
         self.is_running = False
-        # 停止所有线程
+        # 停止所有线程：只设协作取消标志并有限等待，绝不在 GUI 线程无限 wait——
+        # 云端引擎收不到取消事件，可能还要跑几十秒，无限等会把界面冻死
         for thread in self.threads:
             if hasattr(thread, "stop"):
-                thread.stop()  # type: ignore
-            thread.wait()  # 等待线程结束
+                thread.stop(timeout_ms=1000)  # type: ignore
+            if thread.isRunning():
+                self._retire_thread(thread)
         self.threads.clear()
         self.current_tasks.clear()
         # 清空任务队列
         with self.task_queue.mutex:
             self.task_queue.queue.clear()
+
+    def _retire_thread(self, thread: QThread):
+        """把退不下来的线程移交给僵尸列表：断开全部信号（UI 已清空，别再触碰），
+        跑完后自动 deleteLater。QThread 对象由列表持有引用，不会中途析构。"""
+        for sig_name in ("finished", "cancelled", "error", "progress"):
+            signal = getattr(thread, sig_name, None)
+            if signal is None:
+                continue
+            try:
+                signal.disconnect()
+            except TypeError:
+                pass  # 本来就没有连接
+        try:
+            thread.finished.connect(thread.deleteLater)
+        except RuntimeError:
+            pass
+        self.zombie_threads.append(thread)
+        logger.warning("批量任务线程未能及时退出（云端引擎等网络层结束），已移交后台自然收尾")
