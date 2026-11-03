@@ -60,3 +60,32 @@ def test_stopped_worker_not_retired():
     batch = _make_batch(t)
     batch.stop_all()
     assert batch.zombie_threads == []
+
+
+def test_retire_uses_native_finished_not_shadowed_signal():
+    """worker 用自定义 finished 遮蔽了 QThread 原生信号时，回收清理必须挂在
+    原生生命周期信号上：线程真正退出后才从僵尸列表移除并 deleteLater。"""
+    import time
+
+    from PyQt5.QtCore import QThread, pyqtSignal
+    from PyQt5.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+
+    class Shadowed(QThread):
+        finished = pyqtSignal(int)  # 遮蔽原生信号，且 run() 里从不发射它
+
+    batch = _make_batch()
+    t = Shadowed()
+    batch.threads = [t]
+    batch._retire_thread(t)
+    assert batch.zombie_threads == [t], "正在运行的线程应进入僵尸列表"
+
+    t.start()
+    assert t.wait(3000)
+    for _ in range(40):
+        app.processEvents()
+        time.sleep(0.05)
+        if not batch.zombie_threads:
+            break
+    assert batch.zombie_threads == [], "原生 finished 触发后应从僵尸列表移除"
